@@ -27,19 +27,20 @@ def npz_to_spike_tensor(x, y, p, t, timesteps, H, W):
     Returns:
         spikes (torch.Tensor): shape (timesteps, 2, H, W)
     '''
-    spikes = torch.zeros(timesteps, 2, H, W, dtype = torch.float32)
+    spikes = torch.zeros(timesteps, 2, H, W, dtype = torch.bool)
     x_idx = torch.from_numpy(x).long()
     y_idx = torch.from_numpy(y).long()
     t_raw = torch.from_numpy(t).float()
     p_idx = torch.from_numpy(p).long()
 
     t_bin = ((t_raw-t_raw.min())/(t_raw.max()-t_raw.min())*(timesteps-1)).floor().long()
-    spikes[t_bin, p_idx, y_idx, x_idx] = 1.0
+    spikes[t_bin, p_idx, y_idx, x_idx] = True
     
     return spikes
 
 class NCaltechDataset(Dataset):
-    def __init__(self, root_dir, T=120, H=320, W=320):
+    # 173 * 233 is the maximum dimentions in the N-Caltech101 dataset (Faces-easy and Motobikes), this can be verified with datasets/inspect_npz.py.
+    def __init__(self, root_dir, T=300, H=173, W=233):
         self.root = root_dir / "data" / "decoded_npz" / "ncaltech101" / "events"
         self.T = T
         self.H = H
@@ -62,3 +63,8 @@ class NCaltechDataset(Dataset):
         spikes = npz_to_spike_tensor(x, y, p, t, self.T, self.H, self.W)
         
         return spikes, torch.tensor(label, dtype=torch.long) 
+
+
+    def __len__(self):
+        return len(self.samples)
+

@@ -7,6 +7,7 @@
 ###################################################################################
 
 import os
+from pathlib import Path
 
 import torch
 import torch.nn as nn
@@ -21,6 +22,10 @@ from SpykeTorch import visualization as vis
 from SpykeTorch import utils
 from torchvision import transforms
 
+import matplotlib.pyplot as plt
+
+from datasets.ncaltech101_dataset import NCaltechDataset
+
 if torch.backends.mps.is_available():
     device = torch.device("mps")
     print("[DEVICE]: mps")
@@ -31,10 +36,12 @@ else:
     device = torch.device("cpu")
     print("[DEVICE]: CPU\nCheck CUDA/mps availablity.")
 
+# Testing global variables
+MAX_ITERS = 10
 
-class KheradpishehMNIST(nn.Module):
+class LiuNCaltech101(nn.Module):
     def __init__(self):
-        super(KheradpishehMNIST, self).__init__()
+        super(LiuNCaltech101, self).__init__()
 
         self.conv1 = snn.Convolution(2, 32, 5, 0.8, 0.05)
         self.conv1_t = 10
@@ -63,19 +70,20 @@ class KheradpishehMNIST(nn.Module):
     def forward(self, input, max_layer):
         input = sf.pad(input.float(), (2,2,2,2), 0)
         if self.training:
-            pot = self.conv1(input)
-            spk, pot = sf.fire(pot, self.conv1_t, True)
+            cur = self.conv1(input)
+            spk, pot = sf.fire(cur, self.conv1_t, 0.95, True)
             if max_layer == 1:
-                self.spk_cnt1 += 1
-                if self.spk_cnt1 >= 500:
-                    self.spk_cnt1 = 0
-                    ap = torch.tensor(self.stdp1.learning_rate[0][0].item(), device=self.stdp1.learning_rate[0][0].device) * 2
-                    ap = torch.min(ap, self.max_ap)
-                    an = ap * -0.75
-                    self.stdp1.update_all_learning_rate(ap.item(), an.item())
-                pot = sf.pointwise_inhibition(pot)
-                spk = pot.sign()
-                winners = sf.get_k_winners(pot, self.k1, self.r1, spk)
+            #     self.spk_cnt1 += 1
+            #     if self.spk_cnt1 >= 500:
+            #         self.spk_cnt1 = 0
+            #         ap = torch.tensor(self.stdp1.learning_rate[0][0].item(), device=self.stdp1.learning_rate[0][0].device) * 2
+            #         ap = torch.min(ap, self.max_ap)
+            #         an = ap * -0.75
+            #         self.stdp1.update_all_learning_rate(ap.item(), an.item())
+            #     pot = sf.pointwise_inhibition(pot)
+            #     spk = pot.sign()
+                winners = sf.get_k_winners(pot, spk, self.k1, self.r1)
+                print(winners)
                 self.save_data(input, pot, spk, winners)
                 return spk, pot
             spk_in = sf.pad(sf.pooling(spk, 2, 2, 1), (1,1,1,1))
@@ -108,8 +116,6 @@ def train_unsupervise(network, data, layer_idx):
     network.train()
     for i in range(len(data)):
         data_in = data[i]
-        if use_cuda:
-            data_in = data_in.cuda()
         network(data_in, layer_idx)
         network.stdp(layer_idx)
 
@@ -119,90 +125,30 @@ def test(network, data, target, layer_idx):
     t = [None] * len(data)
     for i in range(len(data)):
         data_in = data[i]
-        if use_cuda:
-            data_in = data_in.cuda()
         output,_ = network(data_in, layer_idx).max(dim = 0)
         ans[i] = output.reshape(-1).cpu().numpy()
         t[i] = target[i]
     return np.array(ans), np.array(t)
 
-class S1Transform:
-    def __init__(self, filter, timesteps = 15):
-        self.to_tensor = transforms.ToTensor()
-        self.filter = filter
-        self.temporal_transform = utils.Intensity2Latency(timesteps)
-        self.cnt = 0
-    def __call__(self, image):
-        if self.cnt % 1000 == 0:
-            print(self.cnt)
-        self.cnt+=1
-        image = self.to_tensor(image) * 255
-        image.unsqueeze_(0)
-        image = self.filter(image)
-        image = sf.local_normalization(image, 8)
-        temporal_image = self.temporal_transform(image)
-        return temporal_image.sign().byte()
+root = Path(__file__).parent
+train_dataset = NCaltechDataset(root_dir=root, T=300, H=173, W=233)
+train_loader = DataLoader(train_dataset, batch_size=1, shuffle=True)
 
-kernels = [ utils.DoGKernel(7,1,2),
-            utils.DoGKernel(7,2,1),]
-filter = utils.Filter(kernels, padding = 3, thresholds = 50)
-s1 = S1Transform(filter)
+model = LiuNCaltech101()
 
-data_root = "data"
-MNIST_train = utils.CacheDataset(torchvision.datasets.MNIST(root=data_root, train=True, download=True, transform = s1))
-MNIST_test = utils.CacheDataset(torchvision.datasets.MNIST(root=data_root, train=False, download=True, transform = s1))
-MNIST_loader = DataLoader(MNIST_train, batch_size=len(MNIST_train), shuffle=False)
-MNIST_testLoader = DataLoader(MNIST_test, batch_size=len(MNIST_test), shuffle=False)
+## Temp testing
+data = train_dataset[161]
+pot, spk = model(data[0], max_layer=1)
+inp = model.ctx["input_spikes"]
+pot = model.ctx["potentials"]
+spk = model.ctx["output_spikes"]
 
-kheradpisheh = KheradpishehMNIST()
-if use_cuda:
-    kheradpisheh.cuda()
+# vis.spikes_over_time(spk)
+# vis.spikes_map(spk)
 
-# Training The First Layer
-print("Training the first layer")
-if os.path.isfile("saved_l1.net"):
-    kheradpisheh.load_state_dict(torch.load("saved_l1.net"))
-else:
-    for epoch in range(2):
-        print("Epoch", epoch)
-        iter = 0
-        for data,_ in MNIST_loader:
-            print("Iteration", iter)
-            train_unsupervise(kheradpisheh, data, 1)
-            print("Done!")
-            iter+=1
-    torch.save(kheradpisheh.state_dict(), "saved_l1.net")
+print("spike pot mean: ",pot[spk==1].mean())
+print("non-spike pot mean: ",pot[spk==0].mean())
 
-# Training The Second Layer
-print("Training the second layer")
-if os.path.isfile("saved_l2.net"):
-    kheradpisheh.load_state_dict(torch.load("saved_l2.net"))
-for epoch in range(20):
-    print("Epoch", epoch)
-    iter = 0
-    for data,_ in MNIST_loader:
-        print("Iteration", iter)
-        train_unsupervise(kheradpisheh, data, 2)
-        print("Done!")
-        iter+=1
-torch.save(kheradpisheh.state_dict(), "saved_l2.net")
-
-# Classification
-# Get train data
-for data,target in MNIST_loader:
-    train_X, train_y = test(kheradpisheh, data, target, 2)
-    
-
-# Get test data
-for data,target in MNIST_testLoader:
-    test_X, test_y = test(kheradpisheh, data, target, 2)
-
-# SVM
-from sklearn.svm import LinearSVC
-clf = LinearSVC(C=2.4)
-clf.fit(train_X, train_y)
-predict_train = clf.predict(train_X)
-predict_test = clf.predict(test_X)
 
 def get_performance(X, y, predictions):
     correct = 0
@@ -215,5 +161,5 @@ def get_performance(X, y, predictions):
                 correct += 1
     return (correct/len(X), (len(X)-(correct+silence))/len(X), silence/len(X))
 
-print(get_performance(train_X, train_y, predict_train))
-print(get_performance(test_X, test_y, predict_test))
+# print(get_performance(train_X, train_y, predict_train))
+# print(get_performance(test_X, test_y, predict_test))

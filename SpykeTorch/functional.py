@@ -35,8 +35,45 @@ def pooling(input, kernel_size, stride=None, padding=0):
     """
     return fn.max_pool2d(input, kernel_size, stride, padding)
 
-def fire(potentials, threshold=None, return_thresholded_potentials=False):
-    r"""Computes the spike-wave tensor from tensor of potentials. If :attr:`threshold` is :attr:`None`, all the neurons
+def fire(x, threshold, decay, return_thresholded_potentials, mode="temporal"):
+    if mode == "temporal":
+        spikes, potentials = _fire_temporal(currents = x, threshold = threshold, decay = decay, return_thresholded_potentials = return_thresholded_potentials)
+    elif mode == "static":
+        spikes, potentials = _fire_static(potentials = x, threshold = threshold, return_thresholded_potentials=return_thresholded_potentials)
+    return spikes, potentials
+
+def _fire_temporal(currents, decay, threshold, return_thresholded_potentials = True):
+    r"""
+    Compute spikes and potentials with currents and decay. Reset is hard, no potential = 0 after each spike.
+
+    Args:
+        curents (Tensor): Tensor of input currents at each timestep (T, C, H, W).
+        decay (float): Decay factor.
+        threashold (float): firing threshold.
+        
+    Returns:
+        spikes (Tensor): Tensor of output spikes
+        potentials (Tensor): Tensor of membrane potentials.
+    """
+    T = currents.shape[0]
+    potentials = torch.zeros_like(currents)
+    spikes = torch.zeros_like(currents)
+    V = torch.zeros_like(currents[0])
+
+    for t in range(T):
+        if t > 0:
+            V = V * decay * (1.0 - spikes[t-1]) + currents[t]
+        else:
+            V = V * decay + currents[t]
+
+        potentials[t] = V.clone()
+        spikes[t] = (V >= threshold).float()
+
+    return (spikes, potentials) if return_thresholded_potentials else spikes
+
+def _fire_static(potentials, threshold=None, return_thresholded_potentials=False):
+    r"""NOTE: LEGACY FUNCTION. This function is used on static datasets for backward compatibility. See README.md for more information on static datasets and temporal datasets. 
+    Computes the spike-wave tensor from tensor of potentials. If :attr:`threshold` is :attr:`None`, all the neurons
     emit one spike (if the potential is greater than zero) in the last time step.
 
     Args:
@@ -57,8 +94,8 @@ def fire(potentials, threshold=None, return_thresholded_potentials=False):
         return thresholded.sign(), thresholded
     return thresholded.sign()
 
-def fire_(potentials, threshold=None):
-    r"""The inplace version of :func:`~fire`
+def fire_static_(potentials, threshold=None):
+    """The inplace version of :func:`~_fire_static`
     """
     if threshold is None:
         potentials[:-1]=0
@@ -144,9 +181,56 @@ def feature_inhibition(potentials, inhibited_features):
         feature_inhibition_(potentials_copy, inhibited_features)
     return potentials_copy
 
+def get_k_winners(potentials, spikes, kwta = 1, inhibition_radius = 0):
+    '''
+    find at most kwta winners based on the earliest spike time, then based on the maximum potential.
+    It returns a list of winners, each in a tuple (timestep, feature, row, column).
+
+    Winners are selected sequentially. Each winner inhibits surrounding neurons in a specific radius of the other feature maps, as well as all other neurons in the current feature map (only one winner from each feature map).
+
+    Args:
+        potentials (Tensor): The tensor of input potentials.
+        kwta (int, optional): The number of winners. Default: 1
+        inhibition_radius (int, optional): The radius of lateral inhibition. Default: 0
+        Spikes (Tensor): The spikes from previous fire() function.
+
+    Returns:
+        List: List of winners.
+    '''
+    device = spikes.device
+    spikes = spikes.clone()
+    potentials = potentials.clone()
+    winners = []
+    T, C, H, W = spikes.shape
+
+    for k in range(kwta):
+        spiked_time = spikes.any(dim=(1,2,3)) # shape: [timestep]
+        if not spiked_time.any():
+            raise ValueError("Spikes is empty, check if you have more kwta than number of features - features are inhibited after each winner selection!")
+        t_w = torch.where(spiked_time)[0][0].item()
+        candidates = potentials[t_w]
+        c_w, h_w, w_w = torch.unravel_index(torch.argmax(candidates), candidates.shape)
+        winners.append((t_w, c_w.item(), h_w.item(), w_w.item()))
+
+        # Inhibit the same feature map from winning again
+        spikes[:,c_w,:,:] = 0 
+        potentials[:,c_w,:,:] = 0 
+
+        # Inhibit the inhibition radius for all feature maps
+        h_start = max(0, h_w - inhibition_radius)
+        h_end = min(H, h_w + inhibition_radius + 1)
+        w_start = max(0, w_w - inhibition_radius)
+        w_end = min(W, w_w + inhibition_radius + 1)
+
+        spikes[:,:,h_start:h_end,w_start:w_end] = 0
+        potentials[:,:,h_start:h_end,w_start:w_end] = 0
+
+    return winners
+
+
 # returns list of winners
 # inhibition_radius is to increase the chance of diversity among features (if needed)
-def get_k_winners(potentials, kwta = 1, inhibition_radius = 0, spikes = None):
+def get_k_winners_legacy(potentials, kwta = 1, inhibition_radius = 0, spikes = None):
     r"""Finds at most :attr:`kwta` winners first based on the earliest spike time, then based on the maximum potential.
     It returns a list of winners, each in a tuple of form (feature, row, column).
 

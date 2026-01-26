@@ -259,3 +259,8 @@ SpykeTorch/__pycache__
 
 # Dataset
 data/
+
+#Others
+devlog.md
+*.swp
+*.net

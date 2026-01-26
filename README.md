@@ -27,6 +27,14 @@ To download and process the N-Caltech101 dataset:
 ```
 python scripts/download_ncaltech101.py
 ```
+**Static Datasets and Temporal Datasets**
+The main feature of this fork compared to the original SpykeTorch library is that it added support to temporal datasets. The original library only support static datasets, which is defined as follow:
+1. Once a spike occurs, it stays on until the end of the timesteps for the sample.
+2. Ojbect and camera stays static, there is no optic flow.
+
+Static datasets are generally generated from static images.
+
+Dynamic datasets are event data with optic flow. This means event videos captured with event cameras with camera movement and / or object movements, a single pixel can spike, then goes back to 0 and repeat.
 
 **Scripts info:**
  - [`MozafariShallow.py`](MozafariShallow.py): Reimplementation of the paper "First-Spike-Based Visual Categorization Using Reward-Modulated STDP" (https://ieeexplore.ieee.org/document/8356226/).

@@ -6,6 +6,14 @@ from torchvision import transforms
 from torchvision import datasets
 import os
 
+
+def make_test_currents(T, F, H, W, seed = 42):
+    torch.manual_seed(seed)
+    shape = (T, F, H, W)
+    test_currents = torch.rand(T,F,H,W)
+
+    return test_currents
+
 def to_pair(data):
     r"""Converts a single or a tuple of data into a pair. If the data is a tuple with more than two elements, it selects
     the first two of them. In case of single data, it duplicates that data into a pair.
