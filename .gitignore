@@ -264,3 +264,6 @@ data/
 devlog.md
 *.swp
 *.net
+/.claude
+.direnv
+CLAUDE.md

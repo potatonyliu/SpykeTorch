@@ -56,6 +56,11 @@ class Convolution(nn.Module):
         self.weight.requires_grad_(False) # We do not use gradients
         self.reset_weight(weight_mean, weight_std)
 
+        # New parameters for STDP
+        self.decay = 0.95
+        self.threshold = 10.0
+        self.reset = 0.0
+
     def reset_weight(self, weight_mean=0.8, weight_std=0.02):
         """Resets weights to random values based on a normal distribution.
 
@@ -114,20 +119,18 @@ class Pooling(nn.Module):
         self.dilation = 1
         self.return_indices = False
         self.ceil_mode = False
-
+        
     def forward(self, input):
         return sf.pooling(input, self.kernel_size, self.stride, self.padding)
 
 class STDP(nn.Module):
     r"""Performs STDP learning rule over synapses of a convolutional layer based on the following formulation:
 
+    The following equations allows the use of `torch.cumsum()` to compute pre-synaptic spikes with decay.
+
     .. math::
-        \Delta W_{ij}=
-        \begin{cases}
-            a_{LTP}\times \left(W_{ij}-W_{LB}\right)\times \left(W_{UP}-W_{ij}\right) & \ \ \ t_j - t_i \leq 0,\\
-            a_{LTD}\times \left(W_{ij}-W_{LB}\right)\times \left(W_{UP}-W_{ij}\right) & \ \ \ t_j - t_i > 0,\\
-        \end{cases}
-    
+        \sum_{i=0}^t S(i) \cdot \gamma^{t-i}=\gamma^{t}\sum_{i=0}^t S(i) \cdot \gamma^{-i}
+
     where :math:`i` and :math:`j` refer to the post- and pre-synaptic neurons, respectively,
     :math:`\Delta w_{ij}` is the amount of weight change for the synapse connecting the two neurons,
     and :math:`a_{LTP}`, and :math:`a_{LTD}` scale the magnitude of weight change. Besides,
@@ -162,7 +165,7 @@ class STDP(nn.Module):
         lower_bound (float, optional): Lower bound of the weight range. Default: 0
         upper_bound (float, optional): Upper bound of the weight range. Default: 1
     """
-    def __init__(self, conv_layer, learning_rate, use_stabilizer = True, lower_bound = 0, upper_bound = 1):
+    def __init__(self, conv_layer, learning_rate, timesteps, use_stabilizer = True, lower_bound = 0, upper_bound = 1):
         super(STDP, self).__init__()
         self.conv_layer = conv_layer
         if isinstance(learning_rate, list):
@@ -180,45 +183,39 @@ class STDP(nn.Module):
         self.lower_bound = lower_bound
         self.upper_bound = upper_bound
 
-    def get_pre_post_ordering(self, input_spikes, output_spikes, winners):
-        r"""Computes the ordering of the input and output spikes with respect to the position of each winner and
-        returns them as a list of boolean tensors. True for pre-then-post (or concurrency) and False for post-then-pre.
-        Input and output tensors must be spike-waves.
+        # decay matrices
+        t = torch.arange(timesteps)
+        self.register_buffer('gamma_t',torch.pow(conv_layer.decay, t).view(timesteps, 1, 1, 1))
+        self.register_buffer('gamma_neg_t',torch.pow(conv_layer.decay, -t).view(timesteps, 1, 1, 1))
 
-        Args:
-            input_spikes (Tensor): Input spike-wave
-            output_spikes (Tensor): Output spike-wave
-            winners (List of Tuples): List of winners. Each tuple denotes a winner in a form of a triplet (feature, row, column).
 
-        Returns:
-            List: pre-post ordering of spikes
-        """
-        # accumulating input and output spikes to get latencies
-        input_latencies = torch.sum(input_spikes, dim=0)
-        output_latencies = torch.sum(output_spikes, dim=0)
-        result = []
-        for winner in winners:
-            # generating repeated output tensor with the same size of the receptive field
-            out_tensor = torch.ones(*self.conv_layer.kernel_size, device=output_latencies.device) * output_latencies[winner]
-            # slicing input tensor with the same size of the receptive field centered around winner
-            # since there is no padding, there is no need to shift it to the center
-            in_tensor = input_latencies[:,winner[-2]:winner[-2]+self.conv_layer.kernel_size[-2],winner[-1]:winner[-1]+self.conv_layer.kernel_size[-1]]
-            result.append(torch.ge(in_tensor,out_tensor))
-        return result
+
 
     # simple STDP rule
     # gets prepost pairings, winners, weights, and learning rates (all shoud be tensors)
-    def forward(self, input_spikes, potentials, output_spikes, winners=None, kwta = 1, inhibition_radius = 0):
-        if winners is None:
-            winners = sf.get_k_winners(potentials, kwta, inhibition_radius, output_spikes)
-        pairings = self.get_pre_post_ordering(input_spikes, output_spikes, winners)
-        
-        lr = torch.zeros_like(self.conv_layer.weight)
-        for i in range(len(winners)):
-            f = winners[i][0]
-            lr[f] = torch.where(pairings[i], *(self.learning_rate[f]))
+    def forward(self, input_spikes, potentials, output_spikes, winners, kwta = 1):
+        if len(winners) == 0:
+            raise ValueError("Warning: No winner found!")
+        # Get dimentions of the previous layer kernel
+        kernel_size = self.conv_layer.kernel_size
+        dilation = self.conv_layer.dilation
+        padding = self.conv_layer.padding
+        stride = self.conv_layer.stride
+        kH, kW = self.conv_layer.kernel_size
+        weight_updates = torch.zeros_like(self.conv_layer.weight)
 
-        self.conv_layer.weight += lr * ((self.conv_layer.weight-self.lower_bound) * (self.upper_bound-self.conv_layer.weight) if self.use_stabilizer else 1)
+        kH_radius = (kH-1)//2
+        kW_radius = (kW-1)//2
+
+        for (t, f, h, w) in winners:
+            # Center of receptive field in input coordinate
+            h_in = h * stride - padding + kH_radius
+            w_in = w * stride - padding + kW_radius
+            presynaptic_spikes = input_spikes[:t,:,h_in-kH_radius:h_in+kH_radius+1,w_in-kW_radius:w_in+kW_radius+1]
+            postsynaptic_spikes = input_spikes[t+1:,:,h_in-kH_radius:h_in+kH_radius+1,w_in-kW_radius:w_in+kW_radius+1]
+            weight_updates[f] += self.get_buffer('gamma_t')[t] * torch.sum(presynaptic_spikes * self.get_buffer('gamma_neg_t')[:t],dim=0) * self.learning_rate[f][0] + self.get_buffer('gamma_neg_t')[t] * torch.sum(postsynaptic_spikes * self.get_buffer('gamma_t')[t+1:],dim=0) * self.learning_rate[f][1]
+
+        self.conv_layer.weight += weight_updates * ((self.conv_layer.weight-self.lower_bound) * (self.upper_bound-self.conv_layer.weight) if self.use_stabilizer else 1)
         self.conv_layer.weight.clamp_(self.lower_bound, self.upper_bound)
 
     def update_learning_rate(self, feature, ap, an):
