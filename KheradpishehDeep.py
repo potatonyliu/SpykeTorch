@@ -20,30 +20,31 @@ from torchvision.datasets import ImageFolder
 from torch.nn.parameter import Parameter
 import torchvision
 import numpy as np
-from SpykeTorch import snn
+from SpykeTorch import snn, visualization
 from SpykeTorch import functional as sf
 from SpykeTorch import visualization as vis
 from SpykeTorch import utils
 from torchvision import transforms
+from tqdm import tqdm
 
-use_cuda = True
+device = "mps" if torch.backends.mps.is_available() else "cpu"
 
 class KheradpishehMNIST(nn.Module):
     def __init__(self):
         super(KheradpishehMNIST, self).__init__()
 
-        self.conv1 = snn.Convolution(2, 32, 5, 0.8, 0.05)
+        self.conv1 = snn.Convolution(2, 8, 5, 0.8, 0.05)
         self.conv1_t = 10
-        self.k1 = 5
+        self.k1 = 2
         self.r1 = 2
 
-        self.conv2 = snn.Convolution(32, 150, 2, 0.8, 0.05)
-        self.conv2_t = 1
-        self.k2 = 8
-        self.r2 = 1
+        self.conv2 = snn.Convolution(32, 32, 3, 0.8, 0.05)
+        self.conv2_t = 3
+        self.k2 = 6
+        self.r2 = 0
 
-        self.stdp1 = snn.STDP(self.conv1, (0.004, -0.003))
-        self.stdp2 = snn.STDP(self.conv2, (0.004, -0.003))
+        self.stdp1 = snn.STDP(self.conv1, (0.008, -0.006), 30)
+        self.stdp2 = snn.STDP(self.conv2, (0.008, -0.006), 30)
         self.max_ap = Parameter(torch.Tensor([0.15]))
 
         self.ctx = {"input_spikes":None, "potentials":None, "output_spikes":None, "winners":None}
@@ -59,8 +60,9 @@ class KheradpishehMNIST(nn.Module):
     def forward(self, input, max_layer):
         input = sf.pad(input.float(), (2,2,2,2), 0)
         if self.training:
+            # print("input spikes sum: ", input.sum())
             pot = self.conv1(input)
-            spk, pot = sf.fire(pot, self.conv1_t, True)
+            spk, pot = sf.fire(pot, self.conv1_t, 0.95, True)
             if max_layer == 1:
                 self.spk_cnt1 += 1
                 if self.spk_cnt1 >= 500:
@@ -69,28 +71,27 @@ class KheradpishehMNIST(nn.Module):
                     ap = torch.min(ap, self.max_ap)
                     an = ap * -0.75
                     self.stdp1.update_all_learning_rate(ap.item(), an.item())
-                pot = sf.pointwise_inhibition(pot)
-                spk = pot.sign()
-                winners = sf.get_k_winners(pot, self.k1, self.r1, spk)
+                winners = sf.get_k_winners(pot, spk, self.k1, self.r1)
                 self.save_data(input, pot, spk, winners)
                 return spk, pot
+            # print("L1 spike sum: ", spk.sum())
             spk_in = sf.pad(sf.pooling(spk, 2, 2, 1), (1,1,1,1))
-            spk_in = sf.pointwise_inhibition(spk_in)
             pot = self.conv2(spk_in)
-            spk, pot = sf.fire(pot, self.conv2_t, True)
+            spk, pot = sf.fire(pot, self.conv2_t, 0.95, True)
             if max_layer == 2:
-                pot = sf.pointwise_inhibition(pot)
-                spk = pot.sign()
-                winners = sf.get_k_winners(pot, self.k2, self.r2, spk)
+                winners = sf.get_k_winners(pot, spk, self.k2, self.r2)
+                # print ("WINNERS: ", winners)
                 self.save_data(spk_in, pot, spk, winners)
+                # print("L2 spike sum: ", spk.sum())
+                # print("L2 spike shape: ", spk.shape)
                 return spk, pot
             spk_out = sf.pooling(spk, 2, 2, 1)
             return spk_out
         else:
             pot = self.conv1(input)
-            spk, pot = sf.fire(pot, self.conv1_t, True)
+            spk, pot = sf.fire(pot, self.conv1_t, 0.95, True)
             pot = self.conv2(sf.pad(sf.pooling(spk, 2, 2, 1), (1,1,1,1)))
-            spk, pot = sf.fire(pot, self.conv2_t, True)
+            spk, pot = sf.fire(pot, self.conv2_t, 0.95, True)
             spk = sf.pooling(spk, 2, 2, 1)
             return spk
     
@@ -98,14 +99,15 @@ class KheradpishehMNIST(nn.Module):
         if layer_idx == 1:
             self.stdp1(self.ctx["input_spikes"], self.ctx["potentials"], self.ctx["output_spikes"], self.ctx["winners"])
         if layer_idx == 2:
+            # print("ctx 2 input spikes sum: ", self.ctx["input_spikes"].sum())
+            # print("ctx 2 output spikes sum: ", self.ctx["output_spikes"].sum())
             self.stdp2(self.ctx["input_spikes"], self.ctx["potentials"], self.ctx["output_spikes"], self.ctx["winners"])
 
 def train_unsupervise(network, data, layer_idx):
     network.train()
-    for i in range(len(data)):
+    for i in tqdm(range(len(data))):
         data_in = data[i]
-        if use_cuda:
-            data_in = data_in.cuda()
+        data_in = data_in.to(device)
         network(data_in, layer_idx)
         network.stdp(layer_idx)
 
@@ -115,15 +117,14 @@ def test(network, data, target, layer_idx):
     t = [None] * len(data)
     for i in range(len(data)):
         data_in = data[i]
-        if use_cuda:
-            data_in = data_in.cuda()
+        data_in = data_in.to(device)
         output,_ = network(data_in, layer_idx).max(dim = 0)
         ans[i] = output.reshape(-1).cpu().numpy()
         t[i] = target[i]
     return np.array(ans), np.array(t)
 
 class S1Transform:
-    def __init__(self, filter, timesteps = 15):
+    def __init__(self, filter, timesteps = 30):
         self.to_tensor = transforms.ToTensor()
         self.filter = filter
         self.temporal_transform = utils.Intensity2Latency(timesteps)
@@ -137,7 +138,10 @@ class S1Transform:
         image = self.filter(image)
         image = sf.local_normalization(image, 8)
         temporal_image = self.temporal_transform(image)
-        return temporal_image.sign().byte()
+        spikes = temporal_image.sign()
+        non_cumulative = spikes.clone()
+        non_cumulative[1:] = (spikes[1:] - spikes[:-1]).clamp(min=0)
+        return non_cumulative.byte()
 
 kernels = [ utils.DoGKernel(7,1,2),
             utils.DoGKernel(7,2,1),]
@@ -146,34 +150,39 @@ s1 = S1Transform(filter)
 
 data_root = "data"
 MNIST_train = utils.CacheDataset(torchvision.datasets.MNIST(root=data_root, train=True, download=True, transform = s1))
+MNIST_train = torch.utils.data.Subset(MNIST_train, range(2500))
 MNIST_test = utils.CacheDataset(torchvision.datasets.MNIST(root=data_root, train=False, download=True, transform = s1))
 MNIST_loader = DataLoader(MNIST_train, batch_size=len(MNIST_train), shuffle=False)
 MNIST_testLoader = DataLoader(MNIST_test, batch_size=len(MNIST_test), shuffle=False)
 
 kheradpisheh = KheradpishehMNIST()
-if use_cuda:
-    kheradpisheh.cuda()
+kheradpisheh.to(device)
 
 # Training The First Layer
 print("Training the first layer")
-if os.path.isfile("saved_l1.net"):
-    kheradpisheh.load_state_dict(torch.load("saved_l1.net"))
-else:
-    for epoch in range(2):
-        print("Epoch", epoch)
-        iter = 0
-        for data,_ in MNIST_loader:
-            print("Iteration", iter)
-            train_unsupervise(kheradpisheh, data, 1)
-            print("Done!")
-            iter+=1
-    torch.save(kheradpisheh.state_dict(), "saved_l1.net")
+
+# w = torch.load("saved_l1.net", map_location=device)["conv1.weight"]
+# print("mean 0: ", torch.mean(w[:,0,:,:]))
+# print("mean 1: ", torch.mean(w[:,1,:,:]))
+# vis.plot_weights(w[:,0:1,:,:])
+# vis.plot_weights(w[:,1:2,:,:])
+# kheradpisheh.load_state_dict(torch.load("saved_l1.net", map_location=device))
+for epoch in range(2):
+    print("Epoch", epoch)
+    iter = 0
+    for data,_ in MNIST_loader:
+        print("Iteration", iter)
+        train_unsupervise(kheradpisheh, data, 1)
+        print("Done!")
+        iter+=1
+torch.save(kheradpisheh.state_dict(), "saved_l1.net")
+vis.plot_weights(torch.load("saved_l1.net", map_location=device)["conv1.weight"])
 
 # Training The Second Layer
 print("Training the second layer")
-if os.path.isfile("saved_l2.net"):
-    kheradpisheh.load_state_dict(torch.load("saved_l2.net"))
-for epoch in range(20):
+#if os.path.isfile("saved_l2.net"):
+#    kheradpisheh.load_state_dict(torch.load("saved_l2.net", map_location=device))
+for epoch in range(7):
     print("Epoch", epoch)
     iter = 0
     for data,_ in MNIST_loader:
@@ -182,6 +191,7 @@ for epoch in range(20):
         print("Done!")
         iter+=1
 torch.save(kheradpisheh.state_dict(), "saved_l2.net")
+vis.plot_weights(torch.load("saved_l2.net", map_location=device)["conv2.weight"])
 
 # Classification
 # Get train data
@@ -213,3 +223,7 @@ def get_performance(X, y, predictions):
 
 print(get_performance(train_X, train_y, predict_train))
 print(get_performance(test_X, test_y, predict_test))
+
+state = torch.load("saved_l2.net")
+vis.plot_weights(state["conv1.weight"])
+vis.plot_weights(state["conv2.weight"])

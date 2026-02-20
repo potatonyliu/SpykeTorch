@@ -6,28 +6,18 @@
 #                                                                                 #
 ###################################################################################
 
-import os
 from pathlib import Path
 
+import numpy as np
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader
-from torchvision.datasets import ImageFolder
-from torch.nn.parameter import Parameter
-import torchvision
-import numpy as np
-from SpykeTorch import snn
-from SpykeTorch import functional as sf
-from SpykeTorch import visualization as vis
-from SpykeTorch import utils
-from torchvision import transforms
-
-import matplotlib.pyplot as plt
-
 from datasets.ncaltech101_dataset import NCaltechDataset
-
+from SpykeTorch import functional as sf
+from SpykeTorch import snn
+from SpykeTorch import visualization as vis
+from torch.nn.parameter import Parameter
+from torch.utils.data import DataLoader
 from tqdm import tqdm
-import time
 
 if torch.backends.mps.is_available():
     device = torch.device("mps")
@@ -42,28 +32,34 @@ else:
 # Testing global variables
 MAX_ITERS = 10
 
+
 class LiuNCaltech101(nn.Module):
     def __init__(self, timesteps):
-        super(LiuNCaltech101, self).__init__()
+        super().__init__()
 
-        self.conv1 = snn.Convolution(2, 16, 5, 0.8, 0.1)
-        self.conv1_t = 10
-        self.k1 = 8
-        self.r1 = 20
+        self.conv1 = snn.Convolution(2, 16, 7, 0.8, 0.1)
+        self.conv1_t = 30
+        self.k1 = 5
+        self.r1 = 5
 
         self.conv2 = snn.Convolution(16, 150, 2, 0.8, 0.05)
         self.conv2_t = 1
         self.k2 = 8
         self.r2 = 1
 
-        self.stdp1 = snn.STDP(self.conv1, (0.008, -0.035), timesteps = timesteps)
-        self.stdp2 = snn.STDP(self.conv2, (0.008, -0.035), timesteps = timesteps)
+        self.stdp1 = snn.STDP(self.conv1, (0.027, -0.004), timesteps=timesteps)
+        self.stdp2 = snn.STDP(self.conv2, (0.008, -0.035), timesteps=timesteps)
         self.max_ap = Parameter(torch.Tensor([0.15]))
 
-        self.ctx = {"input_spikes":None, "potentials":None, "output_spikes":None, "winners":None}
+        self.ctx = {
+            "input_spikes": None,
+            "potentials": None,
+            "output_spikes": None,
+            "winners": None,
+        }
         self.spk_cnt1 = 0
         self.spk_cnt2 = 0
-    
+
     def save_data(self, input_spike, potentials, output_spikes, winners):
         self.ctx["input_spikes"] = input_spike
         self.ctx["potentials"] = potentials
@@ -71,7 +67,7 @@ class LiuNCaltech101(nn.Module):
         self.ctx["winners"] = winners
 
     def forward(self, input, max_layer):
-        input = sf.pad(input.float(), (2,2,2,2), 0)
+        input = sf.pad(input.float(), (2, 2, 2, 2), 0)
         if self.training:
             # torch.mps.synchronize()
             # t0 = time.time()
@@ -113,22 +109,34 @@ class LiuNCaltech101(nn.Module):
         else:
             pot = self.conv1(input)
             spk, pot = sf.fire(pot, self.conv1_t, 0.95, True)
-            pot = self.conv2(sf.pad(sf.pooling(spk, 2, 2, 1), (1,1,1,1)))
+            pot = self.conv2(sf.pad(sf.pooling(spk, 2, 2, 1), (1, 1, 1, 1)))
             spk, pot = sf.fire(pot, self.conv2_t, 0.95, True)
             spk = sf.pooling(spk, 2, 2, 1)
             return spk
 
     def stdp(self, layer_idx):
         if layer_idx == 1:
-            self.stdp1(self.ctx["input_spikes"], self.ctx["potentials"], self.ctx["output_spikes"], self.ctx["winners"])
+            self.stdp1(
+                self.ctx["input_spikes"],
+                self.ctx["potentials"],
+                self.ctx["output_spikes"],
+                self.ctx["winners"],
+            )
         if layer_idx == 2:
-            self.stdp2(self.ctx["input_spikes"], self.ctx["potentials"], self.ctx["output_spikes"], self.ctx["winners"])
+            self.stdp2(
+                self.ctx["input_spikes"],
+                self.ctx["potentials"],
+                self.ctx["output_spikes"],
+                self.ctx["winners"],
+            )
+
 
 def train_unsupervise(network, data, layer_idx):
     network.train()
     for i in tqdm(range(len(data))):
-        #TODO: temp
+        # TODO: temp
         data_in = data[i][0]
+        data_in = data_in.to(device)
         # data_in = data[i]
         # torch.mps.synchronize()
         # t0 = time.time()
@@ -140,16 +148,18 @@ def train_unsupervise(network, data, layer_idx):
         # t2 = time.time()
         # print(f"forward: {t1-t0:.3f}s | stdp: {t2-t1:.3f}s.")
 
+
 def test(network, data, target, layer_idx):
     network.eval()
     ans = [None] * len(data)
     t = [None] * len(data)
     for i in range(len(data)):
         data_in = data[i]
-        output,_ = network(data_in, layer_idx).max(dim = 0)
+        output, _ = network(data_in, layer_idx).max(dim=0)
         ans[i] = output.reshape(-1).cpu().numpy()
         t[i] = target[i]
     return np.array(ans), np.array(t)
+
 
 root = Path(__file__).parent
 T = 60
@@ -158,10 +168,11 @@ train_loader = DataLoader(train_dataset, batch_size=1, shuffle=True)
 
 small_dataset = torch.utils.data.Subset(train_dataset, range(10))
 
-model = LiuNCaltech101(timesteps = T)
-
-vis.plot_weights(model.conv1.weight)
-train_unsupervise(model, train_dataset, 1)
+model = LiuNCaltech101(timesteps=T)
+model.to(device)
+for epoch in range(5):
+    print("Epoch: ", epoch)
+    train_unsupervise(model, train_dataset, 1)
 vis.plot_weights(model.conv1.weight)
 
 ## Temp testing
@@ -187,7 +198,8 @@ def get_performance(X, y, predictions):
         else:
             if predictions[i] == y[i]:
                 correct += 1
-    return (correct/len(X), (len(X)-(correct+silence))/len(X), silence/len(X))
+    return (correct / len(X), (len(X) - (correct + silence)) / len(X), silence / len(X))
+
 
 # print(get_performance(train_X, train_y, predict_train))
 # print(get_performance(test_X, test_y, predict_test))
