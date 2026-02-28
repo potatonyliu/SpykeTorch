@@ -4,6 +4,7 @@ from math import ceil, sqrt
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+from pathlib import Path
 
 
 def _to_numpy(data):
@@ -84,13 +85,14 @@ def spikes_map(spk):
     plt.show()
 
 @ensure_numpy
-def plot_weights(weights):
+def plot_weights(weights, save_path: Path | None = None):
     """
     Plot weights of shape [f_out, f_in, kH, kW]
 
     Args:
         weights(tensor): weight tensor directly from the model parameter, e.g. conv1.weight.
-    """
+        save_dir(Path): if set, save the weight as an image into this directory and not show the plot.
+     """
     kernels = np.average(weights, 1)
     f_out, kH, kW = kernels.shape
     nrows = ceil(sqrt(f_out))
@@ -102,7 +104,27 @@ def plot_weights(weights):
         axes[i // ncols, i % ncols].axis('off')
         axes[i // ncols, i % ncols].imshow(kernels[i], cmap='RdBu', vmin = 0, vmax = 1, interpolation = 'nearest')
     plt.tight_layout()
-    plt.show()
+    if save_path is None:
+        plt.show()
+    else:
+        plt.savefig(save_path, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+
+
+def save_curves(history, layer, log_dir):
+    fig, axes = plt.subplots(2, 2, figsize=(10, 8))
+    axes[0,0].plot(history["diversity"])
+    axes[0,0].set_title("Diversity")
+    axes[0,1].plot(history["spike_rate"])
+    axes[0,1].set_title("Spike Rate")
+    axes[1,0].plot(history["w_mean"])
+    axes[1,0].set_title("Weight Mean")
+    axes[1,1].plot(history["w_std"])
+    axes[1,1].set_title("Weight Std")
+    plt.suptitle(f"Layer {layer} Training")
+    plt.tight_layout()
+    plt.savefig(log_dir / f"l{layer}_training_curves.png", dpi=150, bbox_inches="tight")
+    plt.close(fig)
 
 
 
