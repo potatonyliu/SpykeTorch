@@ -260,6 +260,9 @@ SpykeTorch/__pycache__
 # Dataset
 data/
 
+# Logs
+/logs
+
 #Others
 devlog.md
 *.swp
