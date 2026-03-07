@@ -143,15 +143,20 @@ def train_unsupervise(network, data, layer_idx):
     network.train()
     total_spikes = 0
     total_neurons = 0
+    winner_timesteps = []
+
 
     # Direct tqdm to stdout to not log as stderr into run.txt
-    for i in tqdm(range(len(data)), file=stdout):
-        data_in = data[i][0].to(device)
-        spk, pot = network(data_in, layer_idx)
+    for data_in, _ in tqdm((data), file=stdout):
+        spk, pot = network(data_in.to(device), layer_idx)
+        winners = network.ctx["winners"]
+        if len(winners) == 0:
+            continue
         network.stdp(layer_idx)
         total_spikes += spk.sum().item()
         total_neurons += spk.numel()
-    return {"spike_rate": total_spikes / max(total_neurons, 1)}
+        winner_timesteps = torch.as_tensor([w[0] for w in winners], dtype=torch.float).tolist()
+    return {"spike_rate": total_spikes / max(total_neurons, 1), "spike_count": total_spikes, "total_neurons": total_neurons, "winner_timesteps": winner_timesteps}
 
 
 def test(network, data, target, layer_idx):
@@ -160,24 +165,24 @@ def test(network, data, target, layer_idx):
     t = [None] * len(data)
     for i in range(len(data)):
         data_in = data[i]
-        output, _ = network(data_in, layer_idx).max(dim=0)
+        output, _ = network(data_in.to(device), layer_idx).max(dim=0)
         ans[i] = output.reshape(-1).cpu().numpy()
         t[i] = target[i]
     return np.array(ans), np.array(t)
 
-def evaluate_linear_probe(model, dataset, layer, device):
+def evaluate_linear_probe(model, train_dataset, test_dataset, layer, device):
     model.eval()
-    features, labels = [], []
+    X_train, X_test, y_train, y_test = [], [], [], []
     with torch.no_grad():
-        for i in range(len(dataset)):
-            data_in, label = dataset[i]
-            spk, _ = model(data_in.to(device), max_layer=layer)
-            features.append(spk.sum(dim=0).cpu().numpy().flatten())
-            labels.append(label)
+        for data_in, label in tqdm(train_dataset, file=stdout):
+            spk = model(data_in.to(device), max_layer=layer)
+            X_train.append(spk.sum(dim=0).cpu().numpy().flatten())
+            y_train.append(label.item())
 
-    X_train, X_test, y_train, y_test = train_test_split(
-        features, labels, test_size=0.2, random_state=42
-    )
+        for data_in, label in tqdm(test_dataset, file=stdout):
+            spk = model(data_in.to(device), max_layer=layer)
+            X_test.append(spk.sum(dim=0).cpu().numpy().flatten())
+            y_test.append(label.item())
     clf = LinearSVC(max_iter=2000)
     clf.fit(X_train, y_train)
     report = classification_report(y_test, clf.predict(X_test))

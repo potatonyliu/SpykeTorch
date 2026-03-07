@@ -19,6 +19,9 @@ from pathlib import Path
 
 import torch
 from datasets.ncaltech101_dataset import NCaltechDataset
+from sklearn.utils.discovery import all_displays
+from sklearn.model_selection import train_test_split
+from torch.utils.data import Subset
 from LiuDeep import LiuNCaltech101, train_unsupervise, evaluate_linear_probe
 from SpykeTorch import visualization as vis
 from datetime import datetime
@@ -41,22 +44,24 @@ config = {
         "w_mean": 0.8,
         "w_std": 0.1,
         "inhibition_radius": 5,
-        "k_winners": 5,
-        "ltp": 0.004,
-        "ltd": -0.003,
-        "threshold": 15,
+        "k_winners": 16,
+        "ltp": 0.008,
+        "ltd": -0.002,
+        "training_threshold": 50,
+        "passing_threshold": 10,
         "epochs": 5,
     },
     "layer2": {
         "out_channels": 32,
-        "kernel_size": 3,
+        "kernel_size": 5,
         "w_mean": 0.8,
-        "w_std": 0.05,
+        "w_std": 0.1,
         "inhibition_radius": 3,
-        "k_winners": 3,
-        "ltp": 0.002,
+        "k_winners": 32,
+        "ltp": 0.007,
         "ltd": -0.002,
-        "threshold": 10,
+        "training_threshold": 40,
+        "passing_threshold": 10,
         "epochs": 5,
     },
 }
@@ -115,8 +120,14 @@ log(f"Running PyTorch {torch.__version__} with mps")
 checkpoint_l1 = log_dir / "l1.pt"
 checkpoint_l2 = log_dir / "l2.pt"
 
-train_dataset = NCaltechDataset(root_dir=root, T=T, H=173, W=233)
-small_dataset = torch.utils.data.Subset(train_dataset, range(10))
+
+dataset = NCaltechDataset(root_dir=root, T=T, H=173, W=233)
+all_labels = [dataset.samples[i][1] for i in range(len(dataset))]
+all_indices = list(range(len(dataset)))
+train_idx, test_idx = train_test_split(all_indices, test_size=0.2, random_state=42, stratify=all_labels)
+
+train_dataset = Subset(dataset, train_idx)
+test_dataset = Subset(dataset, test_idx)
 
 model = LiuNCaltech101(config)
 model.to(device)
@@ -126,7 +137,7 @@ if checkpoint_l1.exists():
     checkpoint = torch.load(checkpoint_l1, weights_only=True, map_location=device)
     model.load_state_dict(checkpoint["state_dict"])
 else:
-    history = {"diversity": [], "spike_rate": [], "w_mean": [], "w_std": []}
+    history = {"diversity": [], "spike_rate": [], "w_mean": [], "w_std": [], "spike_count": [], "total_neurons": [], "winner_timesteps": []}
     for epoch in range(config["layer1"]["epochs"]):
         t0 = time.time()
         print("epoch: ", epoch)
@@ -142,6 +153,9 @@ else:
 
         history["diversity"].append(diversity.item())
         history["spike_rate"].append(stats["spike_rate"])
+        history["spike_count"].append(stats["spike_count"])
+        history["total_neurons"].append(stats["total_neurons"])
+        history["winner_timesteps"].append(stats["winner_timesteps"])
         history["w_mean"].append(w.mean().item())
         history["w_std"].append(w.std().item())
 
@@ -150,6 +164,9 @@ else:
             f"w_mean:{w.mean().item():.4f} "
             f"w_std:{w.std().item():.4f} "
             f"time:{elapsed:.1f}s "
+            f"spike count:{stats['spike_count']} "
+            f"total neurons:{stats['total_neurons']} "
+            f"Winner timesteps: {stats['winner_timesteps']} "
             f"spike_rate:{stats['spike_rate']:.4f} ")
 
         vis.plot_weights(model.conv1.weight, (log_dir / f"l1_epoch_{epoch}_kernels.png"))
@@ -162,7 +179,6 @@ else:
         'state_dict': model.state_dict(),
         'config': config,
         },checkpoint_l1)
-    log(evaluate_linear_probe(model, train_dataset, 1, device))
 
 log("Layer 2",True)
 if checkpoint_l2.exists():
@@ -205,7 +221,8 @@ else:
         'state_dict': model.state_dict(),
         'config': config,
         },checkpoint_l2)
-    log(evaluate_linear_probe(model, train_dataset, 2, device))
+    log(evaluate_linear_probe(model, train_dataset, test_dataset, 2, device))
+
 def get_performance(x, y, predictions):
     correct = 0
     silence = 0
