@@ -1,3 +1,19 @@
+# Changes I made
+I have changed core functions of the library SpykeTorch to adapt for temporal, real-world event data.
+
+This has no significance in application - SpykeTorch was built for research purposes to demonstrate the efficiency of training with single spike, synthesized data. This attempt to extend its usage kills its efficiency and is merely for practices for myself :)
+
+## Core Functions Changed
+snn.py
+- STDP
+
+functional.py
+- get_k_winners()
+- fire()
+
+## New Model
+- LiuDeep.py
+
 # SpykeTorch
 High-speed simulator of convolutional spiking neural networks with at most one spike per neuron.
 

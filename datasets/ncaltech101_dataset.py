@@ -35,7 +35,6 @@ def npz_to_spike_tensor(x, y, p, t, timesteps, H, W):
 
     t_bin = ((t_raw-t_raw.min())/(t_raw.max()-t_raw.min())*(timesteps-1)).floor().long()
     spikes[t_bin, p_idx, y_idx, x_idx] = True
-    
     return spikes
 
 class NCaltechDataset(Dataset):

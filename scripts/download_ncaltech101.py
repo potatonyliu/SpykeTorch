@@ -100,8 +100,8 @@ def unzip(zip_path):
         print("Folder flattened.")
 
     # Keep only two classes
-    filter_dataset(events)
-    filter_dataset(annotations)
+    # filter_dataset(events)
+    # filter_dataset(annotations)
 
 
 def filter_dataset(data_dir: Path):

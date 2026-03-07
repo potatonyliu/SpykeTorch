@@ -7,7 +7,6 @@ from pathlib import Path
 
 def inspect_npz():
     data = Path(__file__).parents[1] / 'data' / 'decoded_npz' / 'ncaltech101' / 'events'
-    raw_data = Path(__file__).parents[1] / 'data' / 'raw' / 'ncaltech101' / 'events'
     width = []
     height = []
     spike_count = []
@@ -49,6 +48,7 @@ def inspect_raw():
     raw_y_max = []
     raw_spike_count = []
     raw_timesteps = []
+    raw_data = Path(__file__).parents[1] / 'data' / 'raw' / 'ncaltech101' / 'events'
 
     print("RAW BIN data path:", raw_data)
 
@@ -85,13 +85,10 @@ def inspect_raw():
     return raw_width, raw_height, raw_spike_count, raw_timesteps, raw_x_min, raw_x_max, raw_y_min, raw_y_max 
 
 def __main__():
-    
     width, height, spike_count, timesteps, x_min, x_max, y_min, y_max = inspect_npz()
     raw_width, raw_height, raw_spike_count, raw_timesteps, raw_x_min, raw_x_max, raw_y_min, raw_y_max = inspect_raw() 
 
-        
-
-        print(f'''Data Statistics:
+    print(f'''Data Statistics:
           width range: {min(width)} - {max(width)}
           height range: {min(height)} - {max(height)}
           spike count range: {min(spike_count)} - {max(spike_count)}
@@ -102,8 +99,7 @@ def __main__():
           y_max range: {min(y_max)} - {max(y_max)}
           ''')
 
-
-        print(f'''
+    print(f'''
     RAW BIN Data Statistics:
           width range: {min(raw_width)} - {max(raw_width)}
           height range: {min(raw_height)} - {max(raw_height)}
@@ -115,3 +111,5 @@ def __main__():
           y_max range: {min(raw_y_max)} - {max(raw_y_max)}
     ''')
 
+if __name__ == "__main__":
+    __main__()

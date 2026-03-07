@@ -40,13 +40,10 @@ def ensure_numpy(func):
     Return:
         callable: wrapped original function that converts tensors to numpy at run time.
     """
-
     @wraps(func)
     def wrapper(*args, **kwargs):
-        np_args = [_to_numpy(a) for a in args]
-        np_kwargs = {k: _to_numpy(v) for k, v in kwargs.items()}
-        return func(*np_args, **np_kwargs)
-
+        args = [_to_numpy(a) if isinstance(a, (torch.Tensor, dict, list, tuple, np.ndarray)) else a for a in args]
+        return func(*args, **kwargs)
     return wrapper
 
 
