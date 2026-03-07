@@ -51,7 +51,12 @@ class LiuNCaltech101(nn.Module):
             l1["w_mean"],
             l1["w_std"],
         )
-        self.conv1_t = l1["threshold"]
+        if "threshold" in l1:
+            self.conv1_t_pass = l1["threshold"]
+            self.conv1_t_train = l1["threshold"]
+        else:
+            self.conv1_t_train = l1["training_threshold"]
+            self.conv1_t_pass = l1["passing_threshold"]
         self.k1 = l1["k_winners"]
         self.r1 = l1["inhibition_radius"]
 
@@ -62,7 +67,12 @@ class LiuNCaltech101(nn.Module):
             l2["w_mean"],
             l2["w_std"],
         )
-        self.conv2_t = l2["threshold"]
+        if "threshold" in l2:
+            self.conv2_t_pass = l2["threshold"]
+            self.conv2_t_train = l2["threshold"]
+        else:
+            self.conv2_t_train = l2["training_threshold"]
+            self.conv2_t_pass = l2["passing_threshold"]
         self.k2 = l2["k_winners"]
         self.r2 = l2["inhibition_radius"]
 
@@ -91,29 +101,24 @@ class LiuNCaltech101(nn.Module):
         input = sf.pad(input.float(), (2, 2, 2, 2), 0)
         if self.training:
             cur = self.conv1(input)
-            spk, pot = sf.fire(cur, self.conv1_t, 0.95, True)
-
             if max_layer == 1:
+                spk, pot = sf.fire(cur, self.conv1_t_train, 0.95, True)
                 winners = sf.get_k_winners(pot, spk, self.k1, self.r1)
                 self.save_data(input, pot, spk, winners)
                 return spk, pot
-            spk_in = sf.pad(sf.pooling(spk, 2, 2, 1), (1,1,1,1))
-            spk_in = sf.pointwise_inhibition(spk_in)
-            pot = self.conv2(spk_in)
-            spk, pot = sf.fire(pot, self.conv2_t, 0.95, True)
             if max_layer == 2:
-                pot = sf.pointwise_inhibition(pot)
-                spk = pot.sign()
+                spk, pot = sf.fire(cur, self.conv1_t_pass, 0.95, True)
+                spk_in = sf.pad(sf.pooling(spk, 2, 2, 1), (1,1,1,1))
+                pot = self.conv2(spk_in)
+                spk, pot = sf.fire(pot, self.conv2_t_train, 0.95, True)
                 winners = sf.get_k_winners(pot, spk, self.k2, self.r2)
                 self.save_data(spk_in, pot, spk, winners)
                 return spk, pot
-            spk_out = sf.pooling(spk, 2, 2, 1)
-            return spk_out
         else:
             pot = self.conv1(input)
-            spk, pot = sf.fire(pot, self.conv1_t, 0.95, True)
+            spk, pot = sf.fire(pot, self.conv1_t_pass, 0.95, True)
             pot = self.conv2(sf.pad(sf.pooling(spk, 2, 2, 1), (1, 1, 1, 1)))
-            spk, pot = sf.fire(pot, self.conv2_t, 0.95, True)
+            spk, pot = sf.fire(pot, self.conv2_t_pass, 0.95, True)
             spk = sf.pooling(spk, 2, 2, 1)
             return spk
 

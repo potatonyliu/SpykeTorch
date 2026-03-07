@@ -206,7 +206,8 @@ def get_k_winners(potentials, spikes, kwta = 1, inhibition_radius = 0):
     for k in range(kwta):
         spiked_time = spikes.any(dim=(1,2,3)) # shape: [timestep]
         if not spiked_time.any():
-            raise ValueError("Spikes is empty, check if you have more kwta than number of features - features are inhibited after each winner selection!")
+            break
+            #raise ValueError("Spikes is empty, check if you have more kwta than number of features - features are inhibited after each winner selection!")
         t_w = torch.where(spiked_time)[0][0].item()
         candidates = potentials[t_w]
         c_w, h_w, w_w = torch.unravel_index(torch.argmax(candidates), candidates.shape)
