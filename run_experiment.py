@@ -43,24 +43,24 @@ config = {
         "kernel_size": 5,
         "w_mean": 0.8,
         "w_std": 0.1,
-        "inhibition_radius": 5,
-        "k_winners": 16,
-        "ltp": 0.008,
+        "inhibition_radius": 10,
+        "k_winners": 12,
+        "ltp": 0.004,
         "ltd": -0.002,
-        "training_threshold": 50,
+        "training_threshold": 60,
         "passing_threshold": 10,
-        "epochs": 5,
+        "epochs": 2,
     },
     "layer2": {
         "out_channels": 32,
         "kernel_size": 5,
         "w_mean": 0.8,
         "w_std": 0.1,
-        "inhibition_radius": 3,
+        "inhibition_radius": 4,
         "k_winners": 32,
-        "ltp": 0.007,
+        "ltp": 0.008,
         "ltd": -0.002,
-        "training_threshold": 40,
+        "training_threshold": 60,
         "passing_threshold": 10,
         "epochs": 5,
     },
@@ -170,6 +170,7 @@ else:
             f"spike_rate:{stats['spike_rate']:.4f} ")
 
         vis.plot_weights(model.conv1.weight, (log_dir / f"l1_epoch_{epoch}_kernels.png"))
+        vis.plot_weights_detailed(model.conv1.weight, log_dir, f"l1_epoch_{epoch}_kernels_detail")
 
     with open(log_dir / "history_l1.json", "w") as f:
         json.dump(history, f, indent=4)
@@ -212,6 +213,7 @@ else:
             f"spike_rate:{stats['spike_rate']:.4f} ")
 
         vis.plot_weights(model.conv2.weight, (log_dir / f"l2_epoch_{epoch}_kernels.png"))
+        vis.plot_weights_detailed(model.conv2.weight, log_dir, f"l2_epoch_{epoch}_kernels_detail")
 
     with open(log_dir / "history_l2.json", "w") as f:
         json.dump(history, f, indent=4)

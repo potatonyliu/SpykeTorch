@@ -183,7 +183,7 @@ def evaluate_linear_probe(model, train_dataset, test_dataset, layer, device):
             spk = model(data_in.to(device), max_layer=layer)
             X_test.append(spk.sum(dim=0).cpu().numpy().flatten())
             y_test.append(label.item())
-    clf = LinearSVC(max_iter=2000)
+    clf = LinearSVC(max_iter=10000)
     clf.fit(X_train, y_train)
     report = classification_report(y_test, clf.predict(X_test))
     return report

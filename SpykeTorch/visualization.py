@@ -108,6 +108,34 @@ def plot_weights(weights, save_path: Path | None = None):
         plt.close(fig)
 
 
+@ensure_numpy
+def plot_weights_detailed(weights, save_dir: Path, prefix: str):
+    """
+    Plot each output kernel's per-input-channel weights as separate images.
+
+    One PNG per output channel, showing all f_in input sub-kernels side by side.
+    Saved as {save_dir}/{prefix}_f{i:02d}.png.
+
+    Args:
+        weights: weight tensor [f_out, f_in, kH, kW]
+        save_dir: directory to save images into
+        prefix: filename prefix, e.g. "l1_epoch_0_kernels_detail"
+    """
+    f_out, f_in, kH, kW = weights.shape
+    for i in range(f_out):
+        fig, axes = plt.subplots(1, f_in, figsize=(2.5 * f_in, 3))
+        if f_in == 1:
+            axes = [axes]
+        fig.suptitle(f"Output kernel {i}", fontsize=11)
+        for c in range(f_in):
+            axes[c].imshow(weights[i, c], cmap='RdBu', vmin=0, vmax=1, interpolation='nearest')
+            axes[c].set_title(f"in {c}", fontsize=8)
+            axes[c].axis('off')
+        plt.tight_layout()
+        plt.savefig(save_dir / f"{prefix}_f{i:02d}.png", dpi=120, bbox_inches="tight")
+        plt.close(fig)
+
+
 def save_curves(history, layer, log_dir):
     fig, axes = plt.subplots(2, 2, figsize=(10, 8))
     axes[0,0].plot(history["diversity"])
