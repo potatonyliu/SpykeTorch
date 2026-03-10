@@ -37,32 +37,33 @@ config = {
     "model": "LiuNCaltech101",
     "timesteps": 60,
     "decay": 0.95,
+    "L1_perfect_weights": True,
     "layer1": {
         "in_channels": 2,
-        "out_channels": 16,
+        "out_channels": 4,
         "kernel_size": 5,
         "w_mean": 0.8,
         "w_std": 0.1,
         "inhibition_radius": 10,
-        "k_winners": 12,
+        "k_winners": 2,
         "ltp": 0.004,
         "ltd": -0.002,
-        "training_threshold": 60,
-        "passing_threshold": 10,
+        "training_threshold": 30,
+        "passing_threshold": 15,
         "epochs": 2,
     },
     "layer2": {
         "out_channels": 32,
-        "kernel_size": 5,
+        "kernel_size": 11,
         "w_mean": 0.8,
         "w_std": 0.1,
-        "inhibition_radius": 4,
-        "k_winners": 32,
+        "inhibition_radius": 5,
+        "k_winners": 16,
         "ltp": 0.008,
         "ltd": -0.002,
-        "training_threshold": 60,
-        "passing_threshold": 10,
-        "epochs": 5,
+        "training_threshold": 100,
+        "passing_threshold": 50,
+        "epochs": 2,
     },
 }
 
@@ -71,6 +72,21 @@ def log(s, console=False):
         print(s, file=f)
     if console:
         print(s)
+
+# Claude-generated function
+def make_perfect_l1_weights(in_channels, kernel_size):
+    """Preset L1 filters: horizontal bar, vertical edge, two diagonals."""
+    k = kernel_size
+    lo, hi = 0.25, 0.75
+    idx = torch.arange(k)
+
+    h  = torch.full((k, k), lo); h[k // 2, :] = hi           # horizontal bar
+    v  = torch.full((k, k), lo); v[:, :k // 2] = hi          # vertical left edge
+    d1 = torch.full((k, k), lo); d1[idx, idx] = hi            # diagonal \
+    d2 = torch.full((k, k), lo); d2[idx, k - 1 - idx] = hi   # diagonal /
+
+    w = torch.stack([h, v, d1, d2]).unsqueeze(1)              # (4, 1, k, k)
+    return w.repeat(1, in_channels, 1, 1)                     # (4, in_channels, k, k)
 
 ######################################################################
 
@@ -138,39 +154,46 @@ if checkpoint_l1.exists():
     model.load_state_dict(checkpoint["state_dict"])
 else:
     history = {"diversity": [], "spike_rate": [], "w_mean": [], "w_std": [], "spike_count": [], "total_neurons": [], "winner_timesteps": []}
-    for epoch in range(config["layer1"]["epochs"]):
-        t0 = time.time()
-        print("epoch: ", epoch)
-        stats = train_unsupervise(model, train_dataset, 1)
-        elapsed = time.time() - t0
+    if config["L1_perfect_weights"]:
+        w = make_perfect_l1_weights(l1["in_channels"], l1["kernel_size"]).to(device)
+        model.conv1.weight.data.copy_(w)
+        vis.plot_weights(model.conv1.weight, (log_dir / "l1_fixed_kernels.png"))
+        vis.plot_weights_detailed(model.conv1.weight, log_dir, "l1_fixed_kernels_detail")
+        torch.save({'state_dict': model.state_dict(), 'config': config}, checkpoint_l1)
+    else:
+        for epoch in range(config["layer1"]["epochs"]):
+            t0 = time.time()
+            print("epoch: ", epoch)
+            stats = train_unsupervise(model, train_dataset, 1)
+            elapsed = time.time() - t0
 
-        w = model.conv1.weight
-        w_flat = w.view(w.shape[0], -1).float()
-        w_norm = w_flat / (w_flat.norm(dim=1, keepdim=True) + 1e-8)
-        sim = (w_norm @ w_norm.T).abs()
-        n = w.shape[0]
-        diversity = 1.0 - (sim.sum() - n) / (n * (n-1))
+            w = model.conv1.weight
+            w_flat = w.view(w.shape[0], -1).float()
+            w_norm = w_flat / (w_flat.norm(dim=1, keepdim=True) + 1e-8)
+            sim = (w_norm @ w_norm.T).abs()
+            n = w.shape[0]
+            diversity = 1.0 - (sim.sum() - n) / (n * (n-1))
 
-        history["diversity"].append(diversity.item())
-        history["spike_rate"].append(stats["spike_rate"])
-        history["spike_count"].append(stats["spike_count"])
-        history["total_neurons"].append(stats["total_neurons"])
-        history["winner_timesteps"].append(stats["winner_timesteps"])
-        history["w_mean"].append(w.mean().item())
-        history["w_std"].append(w.std().item())
+            history["diversity"].append(diversity.item())
+            history["spike_rate"].append(stats["spike_rate"])
+            history["spike_count"].append(stats["spike_count"])
+            history["total_neurons"].append(stats["total_neurons"])
+            history["winner_timesteps"].append(stats["winner_timesteps"])
+            history["w_mean"].append(w.mean().item())
+            history["w_std"].append(w.std().item())
 
-        log(f"epoch:{epoch} "
-            f"diversity:{diversity.item():.4f} "
-            f"w_mean:{w.mean().item():.4f} "
-            f"w_std:{w.std().item():.4f} "
-            f"time:{elapsed:.1f}s "
-            f"spike count:{stats['spike_count']} "
-            f"total neurons:{stats['total_neurons']} "
-            f"Winner timesteps: {stats['winner_timesteps']} "
-            f"spike_rate:{stats['spike_rate']:.4f} ")
+            log(f"epoch:{epoch} "
+                f"diversity:{diversity.item():.4f} "
+                f"w_mean:{w.mean().item():.4f} "
+                f"w_std:{w.std().item():.4f} "
+                f"time:{elapsed:.1f}s "
+                f"spike count:{stats['spike_count']} "
+                f"total neurons:{stats['total_neurons']} "
+                f"Winner timesteps: {stats['winner_timesteps']} "
+                f"spike_rate:{stats['spike_rate']:.4f} ")
 
-        vis.plot_weights(model.conv1.weight, (log_dir / f"l1_epoch_{epoch}_kernels.png"))
-        vis.plot_weights_detailed(model.conv1.weight, log_dir, f"l1_epoch_{epoch}_kernels_detail")
+            vis.plot_weights(model.conv1.weight, (log_dir / f"l1_epoch_{epoch}_kernels.png"))
+            vis.plot_weights_detailed(model.conv1.weight, log_dir, f"l1_epoch_{epoch}_kernels_detail")
 
     with open(log_dir / "history_l1.json", "w") as f:
         json.dump(history, f, indent=4)

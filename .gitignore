@@ -270,3 +270,4 @@ devlog.md
 /.claude
 .direnv
 CLAUDE.md
+.envrc
