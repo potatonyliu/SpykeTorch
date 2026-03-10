@@ -148,6 +148,9 @@ test_dataset = Subset(dataset, test_idx)
 model = LiuNCaltech101(config)
 model.to(device)
 
+log("Random weights baseline", True)
+log(evaluate_linear_probe(model, train_dataset, test_dataset, 2, device))
+
 log("Layer 1",True)
 if checkpoint_l1.exists():
     checkpoint = torch.load(checkpoint_l1, weights_only=True, map_location=device)

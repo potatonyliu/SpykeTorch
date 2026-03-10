@@ -176,12 +176,12 @@ def evaluate_linear_probe(model, train_dataset, test_dataset, layer, device):
     with torch.no_grad():
         for data_in, label in tqdm(train_dataset, file=stdout):
             spk = model(data_in.to(device), max_layer=layer)
-            X_train.append(spk.sum(dim=0).cpu().numpy().flatten())
+            X_train.append(spk.sum(dim=0).mean(dim=(-1, -2)).cpu().numpy().flatten())
             y_train.append(label.item())
 
         for data_in, label in tqdm(test_dataset, file=stdout):
             spk = model(data_in.to(device), max_layer=layer)
-            X_test.append(spk.sum(dim=0).cpu().numpy().flatten())
+            X_test.append(spk.sum(dim=0).mean(dim=(-1, -2)).cpu().numpy().flatten())
             y_test.append(label.item())
     clf = LinearSVC(max_iter=10000)
     clf.fit(X_train, y_train)
