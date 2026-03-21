@@ -26,7 +26,8 @@ The original library processes data converted from static images with single per
 ## Evaluation
 The original implementation of SpykeTorch uses a LinearSVC layer on the last layer's output, summing across all timesteps (C, H, W). When I use this to evaluate, I face some issues:
 1. The linear fitting is extremely slow, given the shape of the final layer 32*40*55 features over 101 classes.
-2. My model constantly produce lower accuracy (~0.29) than random weight (~0.36), even when there is visually distinctive and clean features on kernels.
+2. The linear fitting doesn't converge, even after 10k interations.
+3. My model constantly produce lower accuracy (~0.29) than random weight (~0.36), even when there is visually distinctive and clean features on kernels.
 
 In the [Kirkland paper](https://ieeexplore.ieee.org/document/9207075), they used a third layer, where each neuron correspond to a class for classification. It worked for 2 classes since there is competition in WTA, but it would likely fail for 101 classes on unsupervised STDP. I then switched to taking mean across all spatial dimensions, and only perserve temporal data across each channel. This mimics the idea of looking for the strongly activated features for classification, rather than the actual location of each spike. This method makes sense particularly because N-Caltech101 has optic flow. Summing over temporal dimension messes up spatial definition, since all edges and shape sweeps over the space over time. The linearSVC layer that takes input from each channel at each timestep is more loyal to the design of a spiking convolutional neural network, where we care about the presense and composition of high-level features.
 
