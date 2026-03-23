@@ -38,12 +38,12 @@ print(f"Train: {len(train_set)}  Test: {len(test_set)}")
 
 X_train, y_train = [], []
 for data_in, label in tqdm(train_set, desc="train features", file=stdout):
-    X_train.append(data_in.sum(dim=0).float().mean(dim=(-1, -2)).numpy().flatten())
+    X_train.append(data_in.sum(dim=0).float().numpy().flatten())
     y_train.append(label.item())
 
 X_test, y_test = [], []
 for data_in, label in tqdm(test_set, desc="test features", file=stdout):
-    X_test.append(data_in.sum(dim=0).float().mean(dim=(-1, -2)).numpy().flatten())
+    X_test.append(data_in.sum(dim=0).float().numpy().flatten())
     y_test.append(label.item())
 
 print("Fitting LinearSVC...")

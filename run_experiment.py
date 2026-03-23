@@ -37,15 +37,15 @@ config = {
     "model": "LiuNCaltech101",
     "timesteps": 60,
     "decay": 0.95,
-    "L1_perfect_weights": True,
+    "L1_perfect_weights": False,
     "layer1": {
         "in_channels": 2,
-        "out_channels": 4,
+        "out_channels": 8,
         "kernel_size": 5,
         "w_mean": 0.8,
         "w_std": 0.1,
         "inhibition_radius": 10,
-        "k_winners": 2,
+        "k_winners": 4,
         "ltp": 0.004,
         "ltd": -0.002,
         "training_threshold": 30,
@@ -53,17 +53,17 @@ config = {
         "epochs": 2,
     },
     "layer2": {
-        "out_channels": 32,
+        "out_channels": 64,
         "kernel_size": 11,
         "w_mean": 0.8,
         "w_std": 0.1,
         "inhibition_radius": 5,
-        "k_winners": 16,
+        "k_winners": 32,
         "ltp": 0.008,
         "ltd": -0.002,
-        "training_threshold": 100,
-        "passing_threshold": 50,
-        "epochs": 2,
+        "training_threshold": 150,
+        "passing_threshold": 100,
+        "epochs": 3,
     },
 }
 
@@ -148,15 +148,16 @@ test_dataset = Subset(dataset, test_idx)
 model = LiuNCaltech101(config)
 model.to(device)
 
-log("Random weights baseline", True)
-log(evaluate_linear_probe(model, train_dataset, test_dataset, 2, device))
+# log("Random weights baseline", True)
+# log(evaluate_linear_probe(model, train_dataset, test_dataset, 2, device))
+# sys.exit()
 
 log("Layer 1",True)
 if checkpoint_l1.exists():
     checkpoint = torch.load(checkpoint_l1, weights_only=True, map_location=device)
     model.load_state_dict(checkpoint["state_dict"])
 else:
-    history = {"diversity": [], "spike_rate": [], "w_mean": [], "w_std": [], "spike_count": [], "total_neurons": [], "winner_timesteps": []}
+    history = {"diversity": [], "spike_rate": [], "w_mean": [], "w_std": [], "spike_count": [], "total_neurons": [], "winner_timesteps": [], "spk_per_timestep": []}
     if config["L1_perfect_weights"]:
         w = make_perfect_l1_weights(l1["in_channels"], l1["kernel_size"]).to(device)
         model.conv1.weight.data.copy_(w)
@@ -182,6 +183,7 @@ else:
             history["spike_count"].append(stats["spike_count"])
             history["total_neurons"].append(stats["total_neurons"])
             history["winner_timesteps"].append(stats["winner_timesteps"])
+            history["spk_per_timestep"].append(stats["spk_per_timestep"])
             history["w_mean"].append(w.mean().item())
             history["w_std"].append(w.std().item())
 
@@ -192,7 +194,6 @@ else:
                 f"time:{elapsed:.1f}s "
                 f"spike count:{stats['spike_count']} "
                 f"total neurons:{stats['total_neurons']} "
-                f"Winner timesteps: {stats['winner_timesteps']} "
                 f"spike_rate:{stats['spike_rate']:.4f} ")
 
             vis.plot_weights(model.conv1.weight, (log_dir / f"l1_epoch_{epoch}_kernels.png"))
@@ -212,7 +213,7 @@ if checkpoint_l2.exists():
     checkpoint = torch.load(checkpoint_l2, weights_only=True, map_location=device)
     model.load_state_dict(checkpoint["state_dict"])
 else:
-    history = {"diversity": [], "spike_rate": [], "w_mean": [], "w_std": []}
+    history = {"diversity": [], "spike_rate": [], "w_mean": [], "w_std": [], "spike_count": [], "total_neurons": [], "winner_timesteps": [], "spk_per_timestep": []}
     for epoch in range(config["layer2"]["epochs"]):
         t0 = time.time()
         print("epoch: ", epoch)
@@ -228,6 +229,10 @@ else:
 
         history["diversity"].append(diversity.item())
         history["spike_rate"].append(stats["spike_rate"])
+        history["spike_count"].append(stats["spike_count"])
+        history["total_neurons"].append(stats["total_neurons"])
+        history["winner_timesteps"].append(stats["winner_timesteps"])
+        history["spk_per_timestep"].append(stats["spk_per_timestep"])
         history["w_mean"].append(w.mean().item())
         history["w_std"].append(w.std().item())
 
@@ -236,6 +241,8 @@ else:
             f"w_mean:{w.mean().item():.4f} "
             f"w_std:{w.std().item():.4f} "
             f"time:{elapsed:.1f}s "
+            f"spike count:{stats['spike_count']} "
+            f"total neurons:{stats['total_neurons']} "
             f"spike_rate:{stats['spike_rate']:.4f} ")
 
         vis.plot_weights(model.conv2.weight, (log_dir / f"l2_epoch_{epoch}_kernels.png"))

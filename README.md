@@ -37,7 +37,7 @@ So far:
     - Linear layer that takes input directly from raw data gives 0.17 accuracy on the dataset.
 - Records:
     - After training, the same linear layer gives 0.36.
- 
+
 I think this is the most appropriate evalaution at this stage, but I do want to note that if I evaluate with sum over time and preserving all spatial dimensions, our model performs significantly worse than random weight baseline, potentially due to reasons sketched above.
 
 <img width="588" height="446" alt="l2_epoch_1_kernels" src="https://github.com/user-attachments/assets/d228c19f-f527-4775-9d3e-ca6bfe145ae3" />

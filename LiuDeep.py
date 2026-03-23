@@ -144,19 +144,25 @@ def train_unsupervise(network, data, layer_idx):
     total_spikes = 0
     total_neurons = 0
     winner_timesteps = []
+    spk_per_timestep = None
 
 
     # Direct tqdm to stdout to not log as stderr into run.txt
     for data_in, _ in tqdm((data), file=stdout):
         spk, pot = network(data_in.to(device), layer_idx)
+        if spk_per_timestep is None:
+            spk_per_timestep = spk.sum(dim=(1,2,3))
+        else:
+            spk_per_timestep += spk.sum(dim=(1,2,3))
+
         winners = network.ctx["winners"]
         if len(winners) == 0:
             continue
         network.stdp(layer_idx)
         total_spikes += spk.sum().item()
         total_neurons += spk.numel()
-        winner_timesteps = torch.as_tensor([w[0] for w in winners], dtype=torch.float).tolist()
-    return {"spike_rate": total_spikes / max(total_neurons, 1), "spike_count": total_spikes, "total_neurons": total_neurons, "winner_timesteps": winner_timesteps}
+        winner_timesteps += torch.as_tensor([w[0] for w in winners], dtype=torch.float).tolist()
+    return {"spike_rate": total_spikes / max(total_neurons, 1), "spike_count": total_spikes, "total_neurons": total_neurons, "winner_timesteps": winner_timesteps, "spk_per_timestep": spk_per_timestep.tolist()}
 
 
 def test(network, data, target, layer_idx):
@@ -176,14 +182,14 @@ def evaluate_linear_probe(model, train_dataset, test_dataset, layer, device):
     with torch.no_grad():
         for data_in, label in tqdm(train_dataset, file=stdout):
             spk = model(data_in.to(device), max_layer=layer)
-            X_train.append(spk.sum(dim=0).mean(dim=(-1, -2)).cpu().numpy().flatten())
+            X_train.append(spk.mean(dim=(-1,-2)).cpu().numpy().flatten())
             y_train.append(label.item())
 
         for data_in, label in tqdm(test_dataset, file=stdout):
             spk = model(data_in.to(device), max_layer=layer)
-            X_test.append(spk.sum(dim=0).mean(dim=(-1, -2)).cpu().numpy().flatten())
+            X_test.append(spk.mean(dim=(-1,-2)).cpu().numpy().flatten())
             y_test.append(label.item())
-    clf = LinearSVC(max_iter=10000)
+    clf = LinearSVC(max_iter=10000, class_weight='balanced')
     clf.fit(X_train, y_train)
     report = classification_report(y_test, clf.predict(X_test))
     return report
