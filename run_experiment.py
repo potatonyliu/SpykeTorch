@@ -40,12 +40,12 @@ config = {
     "L1_perfect_weights": False,
     "layer1": {
         "in_channels": 2,
-        "out_channels": 8,
+        "out_channels": 4,
         "kernel_size": 5,
         "w_mean": 0.8,
         "w_std": 0.1,
         "inhibition_radius": 10,
-        "k_winners": 4,
+        "k_winners": 2,
         "ltp": 0.004,
         "ltd": -0.002,
         "training_threshold": 30,
@@ -58,12 +58,12 @@ config = {
         "w_mean": 0.8,
         "w_std": 0.1,
         "inhibition_radius": 5,
-        "k_winners": 32,
+        "k_winners": 16,
         "ltp": 0.008,
         "ltd": -0.002,
-        "training_threshold": 150,
-        "passing_threshold": 100,
-        "epochs": 3,
+        "training_threshold": 100,
+        "passing_threshold": 50,
+        "epochs": 2,
     },
 }
 
@@ -148,9 +148,9 @@ test_dataset = Subset(dataset, test_idx)
 model = LiuNCaltech101(config)
 model.to(device)
 
-# log("Random weights baseline", True)
-# log(evaluate_linear_probe(model, train_dataset, test_dataset, 2, device))
-# sys.exit()
+log("Random weights baseline", True)
+log(evaluate_linear_probe(model, train_dataset, test_dataset, 2, device))
+sys.exit()
 
 log("Layer 1",True)
 if checkpoint_l1.exists():

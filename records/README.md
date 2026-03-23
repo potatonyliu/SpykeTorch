@@ -5,7 +5,7 @@ Each folder is a saved experiment result.
 ## Naming Convention
 
 ```
-YYYYMMDD_<type>_<eval>_<desc>
+YYYYMMDD_<type>_<eval>_<desc>_<acc>
 ```
 
 **type**
@@ -18,4 +18,6 @@ YYYYMMDD_<type>_<eval>_<desc>
 - `gmean` — `sum(dim=0).mean(dim=(-1,-2))`: sum over time, mean over spatial → (C,) = 32 features
 - `smean` — `mean(dim=(-1,-2))`: mean over spatial only, keep time → (T×C) = 1,920 features
 
-**desc** — brief note, e.g. `101cls`, `2cls`, `100cls`
+**desc** — brief note on architecture or dataset, e.g. `101cls`, `100cls`, `L1-stdp-4ch`
+
+**acc** — LinearSVC test accuracy, e.g. `0.42`
