@@ -43,6 +43,7 @@ class LiuNCaltech101(nn.Module):
         T = config["timesteps"]
         l1 = config["layer1"]
         l2 = config["layer2"]
+        l3 = config["layer3"]
 
         self.conv1 = snn.Convolution(
             l1["in_channels"],
@@ -76,10 +77,27 @@ class LiuNCaltech101(nn.Module):
         self.k2 = l2["k_winners"]
         self.r2 = l2["inhibition_radius"]
 
+        self.conv3 = snn.Convolution(
+            l2["out_channels"],
+            l3["out_channels"],
+            l3["kernel_size"],
+            l3["w_mean"],
+            l3["w_std"],
+        )
+        if "threshold" in l3:
+            self.conv3_t_pass = l3["threshold"]
+            self.conv3_t_train = l3["threshold"]
+        else:
+            self.conv3_t_train = l3["training_threshold"]
+            self.conv3_t_pass = l3["passing_threshold"]
+        self.k3 = l3["k_winners"]
+        self.r3 = l3["inhibition_radius"]
+
         self.decay = config["decay"]
 
         self.stdp1 = snn.STDP(self.conv1, (l1["ltp"], l1["ltd"]), timesteps=T)
         self.stdp2 = snn.STDP(self.conv2, (l2["ltp"], l2["ltd"]), timesteps=T)
+        self.stdp3 = snn.STDP(self.conv3, (l3["ltp"], l3["ltd"]), timesteps=T)
         self.max_ap = Parameter(torch.Tensor([config.get("max_ap", 0.15)]))
 
         self.ctx = {
@@ -90,6 +108,7 @@ class LiuNCaltech101(nn.Module):
         }
         self.spk_cnt1 = 0
         self.spk_cnt2 = 0
+        self.spk_cnt3 = 0
 
     def save_data(self, input_spike, potentials, output_spikes, winners):
         self.ctx["input_spikes"] = input_spike
@@ -114,11 +133,24 @@ class LiuNCaltech101(nn.Module):
                 winners = sf.get_k_winners(pot, spk, self.k2, self.r2)
                 self.save_data(spk_in, pot, spk, winners)
                 return spk, pot
+            if max_layer == 3:
+                spk, pot = sf.fire(cur, self.conv1_t_pass, 0.95, True)
+                spk_in = sf.pad(sf.pooling(spk, 2, 2, 1), (1,1,1,1))
+                pot = self.conv2(spk_in)
+                spk, pot = sf.fire(pot, self.conv2_t_pass, 0.95, True)
+                spk_in = sf.pad(sf.pooling(spk, 2, 2, 1), (1,1,1,1))
+                pot = self.conv3(spk_in)
+                spk, pot = sf.fire(pot, self.conv3_t_train, 0.95, True)
+                winners = sf.get_k_winners(pot, spk, self.k3, self.r3)
+                self.save_data(spk_in, pot, spk, winners)
+                return spk, pot
         else:
             pot = self.conv1(input)
             spk, pot = sf.fire(pot, self.conv1_t_pass, 0.95, True)
             pot = self.conv2(sf.pad(sf.pooling(spk, 2, 2, 1), (1, 1, 1, 1)))
             spk, pot = sf.fire(pot, self.conv2_t_pass, 0.95, True)
+            pot = self.conv3(sf.pad(sf.pooling(spk, 2, 2, 1), (1, 1, 1, 1)))
+            spk, pot = sf.fire(pot, self.conv3_t_pass, 0.95, True)
             spk = sf.pooling(spk, 2, 2, 1)
             return spk
 
@@ -137,6 +169,14 @@ class LiuNCaltech101(nn.Module):
                 self.ctx["output_spikes"],
                 self.ctx["winners"],
             )
+        if layer_idx == 3:
+            self.stdp3(
+                self.ctx["input_spikes"],
+                self.ctx["potentials"],
+                self.ctx["output_spikes"],
+                self.ctx["winners"],
+            )
+
 
 
 def train_unsupervise(network, data, layer_idx):

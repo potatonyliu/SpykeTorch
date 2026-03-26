@@ -31,6 +31,7 @@ import json
 import subprocess
 
 RESUME_RUN = None
+CHECKPOINT_SOURCE = "run_20260323T22-34-11-747459"
 
 config = {
     "device": "mps",
@@ -53,7 +54,20 @@ config = {
         "epochs": 2,
     },
     "layer2": {
-        "out_channels": 64,
+        "out_channels": 16,
+        "kernel_size": 7,
+        "w_mean": 0.8,
+        "w_std": 0.1,
+        "inhibition_radius": 5,
+        "k_winners": 8,
+        "ltp": 0.008,
+        "ltd": -0.002,
+        "training_threshold": 50,
+        "passing_threshold": 25,
+        "epochs": 2,
+    },
+    "layer3": {
+        "out_channels": 32,
         "kernel_size": 11,
         "w_mean": 0.8,
         "w_std": 0.1,
@@ -61,8 +75,8 @@ config = {
         "k_winners": 16,
         "ltp": 0.008,
         "ltd": -0.002,
-        "training_threshold": 100,
-        "passing_threshold": 50,
+        "training_threshold": 800,
+        "passing_threshold": 400,
         "epochs": 2,
     },
 }
@@ -108,6 +122,14 @@ else:
     timestamp = datetime.now().strftime("%Y%m%dT%H-%M-%S-%f")
     log_dir = root / "logs" / f"run_{timestamp}"
     log_dir.mkdir(parents=True, exist_ok=True)
+    if CHECKPOINT_SOURCE:
+        import shutil
+        src = root / "logs" / CHECKPOINT_SOURCE
+        if src.exists():
+            shutil.copy(src / "l1.pt", log_dir / "l1.pt")
+            shutil.copy(src / "l2.pt", log_dir / "l2.pt")
+        else:
+            raise Exception("CHECKPOINT_SOURCE doesn't exist!")
     log(f"git hash: {git_hash}")
     log("=====CONFIG=====")
     log(json.dumps(config, indent=4))
@@ -135,6 +157,7 @@ log(f"Running PyTorch {torch.__version__} with mps")
 
 checkpoint_l1 = log_dir / "l1.pt"
 checkpoint_l2 = log_dir / "l2.pt"
+checkpoint_l3 = log_dir / "l3.pt"
 
 
 dataset = NCaltechDataset(root_dir=root, T=T, H=173, W=233)
@@ -148,14 +171,14 @@ test_dataset = Subset(dataset, test_idx)
 model = LiuNCaltech101(config)
 model.to(device)
 
-log("Random weights baseline", True)
-log(evaluate_linear_probe(model, train_dataset, test_dataset, 2, device))
-sys.exit()
+# log("Random weights baseline", True)
+# log(evaluate_linear_probe(model, train_dataset, test_dataset, 2, device))
+# sys.exit()
 
 log("Layer 1",True)
 if checkpoint_l1.exists():
     checkpoint = torch.load(checkpoint_l1, weights_only=True, map_location=device)
-    model.load_state_dict(checkpoint["state_dict"])
+    model.load_state_dict(checkpoint["state_dict"], strict=False)
 else:
     history = {"diversity": [], "spike_rate": [], "w_mean": [], "w_std": [], "spike_count": [], "total_neurons": [], "winner_timesteps": [], "spk_per_timestep": []}
     if config["L1_perfect_weights"]:
@@ -211,7 +234,7 @@ else:
 log("Layer 2",True)
 if checkpoint_l2.exists():
     checkpoint = torch.load(checkpoint_l2, weights_only=True, map_location=device)
-    model.load_state_dict(checkpoint["state_dict"])
+    model.load_state_dict(checkpoint["state_dict"], strict=False)
 else:
     history = {"diversity": [], "spike_rate": [], "w_mean": [], "w_std": [], "spike_count": [], "total_neurons": [], "winner_timesteps": [], "spk_per_timestep": []}
     for epoch in range(config["layer2"]["epochs"]):
@@ -256,7 +279,57 @@ else:
         'state_dict': model.state_dict(),
         'config': config,
         },checkpoint_l2)
-    log(evaluate_linear_probe(model, train_dataset, test_dataset, 2, device))
+
+log("Layer 3",True)
+if checkpoint_l3.exists():
+    checkpoint = torch.load(checkpoint_l3, weights_only=True, map_location=device)
+    model.load_state_dict(checkpoint["state_dict"], strict=False)
+else:
+    history = {"diversity": [], "spike_rate": [], "w_mean": [], "w_std": [], "spike_count": [], "total_neurons": [], "winner_timesteps": [], "spk_per_timestep": []}
+    for epoch in range(config["layer3"]["epochs"]):
+        t0 = time.time()
+        print("epoch: ", epoch)
+        stats = train_unsupervise(model, train_dataset, 3)
+        elapsed = time.time() - t0
+
+        w = model.conv3.weight
+        w_flat = w.view(w.shape[0], -1).float()
+        w_norm = w_flat / (w_flat.norm(dim=1, keepdim=True) + 1e-8)
+        sim = (w_norm @ w_norm.T).abs()
+        n = w.shape[0]
+        diversity = 1.0 - (sim.sum() - n) / (n * (n-1))
+
+        history["diversity"].append(diversity.item())
+        history["spike_rate"].append(stats["spike_rate"])
+        history["spike_count"].append(stats["spike_count"])
+        history["total_neurons"].append(stats["total_neurons"])
+        history["winner_timesteps"].append(stats["winner_timesteps"])
+        history["spk_per_timestep"].append(stats["spk_per_timestep"])
+        history["w_mean"].append(w.mean().item())
+        history["w_std"].append(w.std().item())
+
+        log(f"epoch:{epoch} "
+            f"diversity:{diversity.item():.4f} "
+            f"w_mean:{w.mean().item():.4f} "
+            f"w_std:{w.std().item():.4f} "
+            f"time:{elapsed:.1f}s "
+            f"spike count:{stats['spike_count']} "
+            f"total neurons:{stats['total_neurons']} "
+            f"spike_rate:{stats['spike_rate']:.4f} ")
+
+        vis.plot_weights(model.conv3.weight, (log_dir / f"l3_epoch_{epoch}_kernels.png"))
+        vis.plot_weights_detailed(model.conv3.weight, log_dir, f"l3_epoch_{epoch}_kernels_detail")
+
+    with open(log_dir / "history_l3.json", "w") as f:
+        json.dump(history, f, indent=4)
+    vis.save_curves(history, 3, log_dir)
+
+    torch.save({
+        'state_dict': model.state_dict(),
+        'config': config,
+        },checkpoint_l3)
+
+    log(evaluate_linear_probe(model, train_dataset, test_dataset, 3, device))
 
 def get_performance(x, y, predictions):
     correct = 0
