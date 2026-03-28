@@ -31,7 +31,7 @@ import json
 import subprocess
 
 RESUME_RUN = None
-CHECKPOINT_SOURCE = "run_20260323T22-34-11-747459"
+CHECKPOINT_SOURCE = None
 
 config = {
     "device": "mps",
@@ -41,43 +41,43 @@ config = {
     "L1_perfect_weights": False,
     "layer1": {
         "in_channels": 2,
-        "out_channels": 4,
+        "out_channels": 8,
         "kernel_size": 5,
         "w_mean": 0.8,
         "w_std": 0.1,
         "inhibition_radius": 10,
-        "k_winners": 2,
+        "k_winners": 4,
         "ltp": 0.004,
         "ltd": -0.002,
         "training_threshold": 30,
         "passing_threshold": 15,
-        "epochs": 2,
+        "epochs": 4,
     },
     "layer2": {
-        "out_channels": 16,
-        "kernel_size": 7,
-        "w_mean": 0.8,
-        "w_std": 0.1,
-        "inhibition_radius": 5,
-        "k_winners": 8,
-        "ltp": 0.008,
-        "ltd": -0.002,
-        "training_threshold": 50,
-        "passing_threshold": 25,
-        "epochs": 2,
-    },
-    "layer3": {
         "out_channels": 32,
-        "kernel_size": 11,
+        "kernel_size": 7,
         "w_mean": 0.8,
         "w_std": 0.1,
         "inhibition_radius": 5,
         "k_winners": 16,
         "ltp": 0.008,
         "ltd": -0.002,
-        "training_threshold": 800,
-        "passing_threshold": 400,
-        "epochs": 2,
+        "training_threshold": 250,
+        "passing_threshold": 75,
+        "epochs": 4,
+    },
+    "layer3": {
+        "out_channels": 64,
+        "kernel_size": 11,
+        "w_mean": 0.8,
+        "w_std": 0.1,
+        "inhibition_radius": 5,
+        "k_winners": 32,
+        "ltp": 0.008,
+        "ltd": -0.002,
+        "training_threshold": 3000,
+        "passing_threshold": 500,
+        "epochs": 4,
     },
 }
 
